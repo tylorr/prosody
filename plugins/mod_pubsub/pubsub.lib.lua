@@ -113,7 +113,7 @@ function handlers.set_create(origin, stanza, create, service)
 	return origin.send(reply);
 end
 
-function handlers.set_delete(origin, stanza, delete, service)
+function handlers.set_owner_delete(origin, stanza, delete, service)
 	local node = delete.attr.node;
 
 	local reply, notifier;
@@ -222,7 +222,7 @@ function handlers.set_retract(origin, stanza, retract, service)
 	return origin.send(reply);
 end
 
-function handlers.set_purge(origin, stanza, purge, service)
+function handlers.set_owner_purge(origin, stanza, purge, service)
 	local node, notify = purge.attr.node, purge.attr.notify;
 	notify = (notify == "1") or (notify == "true");
 	local reply;
@@ -238,7 +238,7 @@ function handlers.set_purge(origin, stanza, purge, service)
 	return origin.send(reply);
 end
 
-function handlers.get_configure(origin, stanza, config, service)
+function handlers.get_owner_configure(origin, stanza, config, service)
 	local node = config.attr.node;
 	if not node then
 		return origin.send(pubsub_error_reply(stanza, "nodeid-required"));
@@ -260,7 +260,7 @@ function handlers.get_configure(origin, stanza, config, service)
 	return origin.send(reply);
 end
 
-function handlers.set_configure(origin, stanza, config, service)
+function handlers.set_owner_configure(origin, stanza, config, service)
 	local node = config.attr.node;
 	if not node then
 		return origin.send(pubsub_error_reply(stanza, "nodeid-required"));
@@ -279,7 +279,7 @@ function handlers.set_configure(origin, stanza, config, service)
 	return origin.send(st.reply(stanza));
 end
 
-function handlers.get_default(origin, stanza, default, service)
+function handlers.get_owner_default(origin, stanza, default, service)
 	local reply = st.reply(stanza)
 		:tag("pubsub", { xmlns = xmlns_pubsub_owner })
 			:tag("default")

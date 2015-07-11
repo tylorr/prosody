@@ -23,18 +23,32 @@ module:depends("disco");
 module:add_identity("pubsub", "service", pubsub_disco_name);
 module:add_feature("http://jabber.org/protocol/pubsub");
 
-function handle_pubsub_iq(event)
+function handle_pubsub_iq(event, namespace)
 	local origin, stanza = event.origin, event.stanza;
 	local pubsub = stanza.tags[1];
-	local action = pubsub.tags[1];
-	if not action then
+	local actions = pubsub.tags;
+	if not #actions then
 		return origin.send(st.error_reply(stanza, "cancel", "bad-request"));
 	end
-	local handler = handlers[stanza.attr.type.."_"..action.name];
+
+	local action_names = {};
+	for _, action in ipairs(actions) do
+		table.insert(action_names, action.name) 
+	end
+
+	local ns_ = namespace and namespace.."_" or "";
+	local compound_action = table.concat(action_names, "_");
+	local handler = handlers[stanza.attr.type.."_"..ns_..compound_action];
+
 	if handler then
-		handler(origin, stanza, action, service);
+		if #actions <= 1 then actions = actions[1] end
+		handler(origin, stanza, actions, service);
 		return true;
 	end
+end
+
+function handle_pubsub_owner_iq(event)
+	return handle_pubsub_iq(event, "owner");
 end
 
 function simple_broadcast(kind, node, jids, item, actor)
@@ -57,7 +71,7 @@ function simple_broadcast(kind, node, jids, item, actor)
 end
 
 module:hook("iq/host/"..xmlns_pubsub..":pubsub", handle_pubsub_iq);
-module:hook("iq/host/"..xmlns_pubsub_owner..":pubsub", handle_pubsub_iq);
+module:hook("iq/host/"..xmlns_pubsub_owner..":pubsub", handle_pubsub_owner_iq);
 
 local feature_map = {
 	create = { "create-nodes", "instant-nodes", "item-ids" };
