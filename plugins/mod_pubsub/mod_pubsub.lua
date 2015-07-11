@@ -88,6 +88,7 @@ local feature_map = {
 local function add_disco_features_from_service(service)
 	-- not implemented by service, implemented by lib_pubsub
 	module:add_feature(xmlns_pubsub.."#retrieve-default");
+	module:add_feature(xmlns_pubsub.."#create-and-configure");
 
 	for method, features in pairs(feature_map) do
 		if service[method] then

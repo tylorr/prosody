@@ -87,30 +87,76 @@ function handlers.get_subscriptions(origin, stanza, subscriptions, service)
 	return origin.send(reply);
 end
 
-function handlers.set_create(origin, stanza, create, service)
+local function create_node(stanza, create, service)
 	local node = create.attr.node;
 	local ok, ret, reply;
+	local instant_node = nil;
 	if node then
-		ok, ret = service:create(node, stanza.attr.from);
-		if ok then
-			reply = st.reply(stanza);
-		else
-			reply = pubsub_error_reply(stanza, ret);
-		end
+	  ok, ret = service:create(node, stanza.attr.from);
+	  if ok then
+	    reply = st.reply(stanza);
+	  else
+	    reply = pubsub_error_reply(stanza, ret);
+	  end
 	else
-		repeat
-			node = uuid_generate();
-			ok, ret = service:create(node, stanza.attr.from);
-		until ok or ret ~= "conflict";
-		if ok then
-			reply = st.reply(stanza)
-				:tag("pubsub", { xmlns = xmlns_pubsub })
-					:tag("create", { node = node });
-		else
-			reply = pubsub_error_reply(stanza, ret);
+	  repeat
+	    node = uuid_generate();
+	    ok, ret = service:create(node, stanza.attr.from);
+	  until ok or ret ~= "conflict";
+	  if ok then
+	  	instant_node = node;
+	    reply = st.reply(stanza)
+	      :tag("pubsub", { xmlns = xmlns_pubsub })
+	        :tag("create", { node = node });
+	  else
+	    reply = pubsub_error_reply(stanza, ret);
+	  end
+	end
+	return ok, reply, instant_node;
+end
+
+local function configure_node(stanza, config, node, service)
+	local new_config, err = node_config_form:data(config.tags[1]);
+	if not new_config then
+		return false, st.error_reply(stanza, "modify", "bad-request", err);
+	end
+	local ok, err = service:set_node_config(node, stanza.attr.from, new_config);
+	if not ok then
+		return false, pubsub_error_reply(stanza, err);
+	end
+	return true, st.reply(stanza);
+end
+
+function handlers.set_create(origin, stanza, create, service)
+	local _, reply = create_node(stanza, create, service);
+	return origin.send(reply);
+end
+
+function handlers.set_configure_create(origin, stanza, actions, service)
+	return origin.send(st.error_reply(stanza, "modify", "bad-request"));
+end
+
+function handlers.set_create_configure(origin, stanza, actions, service)
+	local create = actions[1];
+	local config = actions[2];
+
+	local node = config.attr.node;
+	if node then
+		return origin.send(st.error_reply(stanza, "modify", "bad-request"));
+	end
+
+	local ok, create_reply, instant_node = create_node(stanza, create, service);
+	if ok then
+		local node = instant_node or create.attr.node;
+
+		local config_reply;
+		local ok, config_reply = configure_node(stanza, config, node, service);
+
+		if not ok then
+			return origin.send(config_reply);
 		end
 	end
-	return origin.send(reply);
+	return origin.send(create_reply);
 end
 
 function handlers.set_owner_delete(origin, stanza, delete, service)
@@ -265,18 +311,8 @@ function handlers.set_owner_configure(origin, stanza, config, service)
 	if not node then
 		return origin.send(pubsub_error_reply(stanza, "nodeid-required"));
 	end
-	if not service:may(node, stanza.attr.from, "configure") then
-		return origin.send(pubsub_error_reply(stanza, "forbidden"));
-	end
-	local new_config, err = node_config_form:data(config.tags[1]);
-	if not new_config then
-		return origin.send(st.error_reply(stanza, "modify", "bad-request", err));
-	end
-	local ok, err = service:set_node_config(node, stanza.attr.from, new_config);
-	if not ok then
-		return origin.send(pubsub_error_reply(stanza, err));
-	end
-	return origin.send(st.reply(stanza));
+	local _, reply = configure_node(stanza, config, node, service);
+	return origin.send(reply);
 end
 
 function handlers.get_owner_default(origin, stanza, default, service)
