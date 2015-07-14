@@ -20,12 +20,13 @@ local pubsub_errors = {
 	["not-subscribed"] = { "modify", "unexpected-request", nil, "not-subscribed" };
 	["forbidden"] = { "auth", "forbidden" };
 	["not-allowed"] = { "cancel", "not-allowed" };
+	["not-implemented"] = { "cancel", "feature-not-implemented", nil, "unsupported" };
 };
-local function pubsub_error_reply(stanza, error)
+local function pubsub_error_reply(stanza, error, feature)
 	local e = pubsub_errors[error];
 	local reply = st.error_reply(stanza, unpack(e, 1, 3));
 	if e[4] then
-		reply:tag(e[4], { xmlns = xmlns_pubsub_errors }):up();
+		reply:tag(e[4], { xmlns = xmlns_pubsub_errors, feature = feature or nil }):up();
 	end
 	return reply;
 end

@@ -23,6 +23,59 @@ module:depends("disco");
 module:add_identity("pubsub", "service", pubsub_disco_name);
 module:add_feature("http://jabber.org/protocol/pubsub");
 
+local feature_map = {
+	get_subscriptions = { "retrieve-subscriptions" };
+	get_affiliations = { "retrieve-affiliations" };
+	set_subscribe = { "subscribe" };
+	set_unsubscribe = { dependency = "set_subscribe" };
+	get_options = { "subscription-options" };
+	get_default = { "retrieve-default-sub"; dependency = "get_options" };
+	set_options = { dependency = "get_options" };
+	get_items = { "retrieve-items" };
+	set_publish = { "publish", "item-ids", autocreate_on_publish and "auto-create" };
+	set_retract = { "delete-items", "retract-items" };
+	set_create = { "create-nodes", "instant-nodes" };
+	set_create_configure = { "create-and-configure"; dependency = "set_create" };
+	set_owner_delete = { "delete-nodes"; dependency = "set_create" };
+	get_owner_configure = { "config-node" };
+	get_owner_default = { "retrieve-default"; dependency = "get_owner_configure" };
+	set_owner_configure = { dependency = "get_owner_configure" };
+	set_owner_purge = { "purge-nodes" };
+	get_owner_subscriptions = { "manage-subscriptions" };
+	set_owner_subscriptions = { dependency = "get_owner_subscriptions" };
+	get_owner_affiliations = { "modify-affiliations" };
+	set_owner_affiliations = { dependency = "get_owner_affiliations" };
+};
+
+local get_not_implemented_reply;
+local function get_handler(method, stanza)
+	local handler = handlers[method];
+	if handler then
+		return true, handler;
+	else
+		return get_not_implemented_reply(method, stanza);
+	end
+end
+
+get_not_implemented_reply = function(method, stanza)
+	local features = feature_map[method];
+	local reply;
+	if features then
+		local ok = true
+		local ret;
+		if features.dependency then
+			ok, ret = get_handler(features.dependency, stanza);
+		end
+		if ok then
+			local feature = features and features[1] or nil;
+			reply = feature and pubsub_error_reply(stanza, "not-implemented", feature) or nil;
+		else
+			reply = ret;
+		end
+	end
+	return false, reply;
+end
+
 function handle_pubsub_iq(event, namespace)
 	local origin, stanza = event.origin, event.stanza;
 	local pubsub = stanza.tags[1];
@@ -38,13 +91,25 @@ function handle_pubsub_iq(event, namespace)
 
 	local ns_ = namespace and namespace.."_" or "";
 	local compound_action = table.concat(action_names, "_");
-	local handler = handlers[stanza.attr.type.."_"..ns_..compound_action];
+	local method = stanza.attr.type.."_"..ns_..compound_action;
 
-	if handler then
-		if #actions <= 1 then actions = actions[1] end
+	local ok, ret = get_handler(method, stanza);
+
+	if ok then
+		actions = #actions == 1 and actions[1] or actions;
+
+		local handler = ret;
 		handler(origin, stanza, actions, service);
 		return true;
+	else
+		local not_implemented_reply = ret;
+		if not_implemented_reply then
+			origin.send(not_implemented_reply);
+			return true;
+		end
 	end
+
+	return false;
 end
 
 function handle_pubsub_owner_iq(event)
@@ -73,35 +138,22 @@ end
 module:hook("iq/host/"..xmlns_pubsub..":pubsub", handle_pubsub_iq);
 module:hook("iq/host/"..xmlns_pubsub_owner..":pubsub", handle_pubsub_owner_iq);
 
-local feature_map = {
-	create = { "create-nodes", "instant-nodes", "item-ids" };
-	retract = { "delete-items", "retract-items" };
-	purge = { "purge-nodes" };
-	publish = { "publish", autocreate_on_publish and "auto-create" };
-	delete = { "delete-nodes" };
-	get_items = { "retrieve-items" };
-	add_subscription = { "subscribe" };
-	get_subscriptions = { "retrieve-subscriptions" };
-	set_node_config = { "config-node" };
-};
-
 local function add_disco_features_from_service(service)
-	-- not implemented by service, implemented by lib_pubsub
-	module:add_feature(xmlns_pubsub.."#retrieve-default");
-	module:add_feature(xmlns_pubsub.."#create-and-configure");
+	for affiliation in pairs(service.config.capabilities) do
+		if affiliation ~= "none" and affiliation ~= "owner" then
+			module:add_feature(xmlns_pubsub.."#"..affiliation.."-affiliation");
+		end
+	end
+end
 
+local function add_disco_features_from_handlers()
 	for method, features in pairs(feature_map) do
-		if service[method] then
+		if handlers[method] then
 			for _, feature in ipairs(features) do
 				if feature then
 					module:add_feature(xmlns_pubsub.."#"..feature);
 				end
 			end
-		end
-	end
-	for affiliation in pairs(service.config.capabilities) do
-		if affiliation ~= "none" and affiliation ~= "owner" then
-			module:add_feature(xmlns_pubsub.."#"..affiliation.."-affiliation");
 		end
 	end
 end
@@ -157,6 +209,7 @@ function set_service(new_service)
 	service = new_service;
 	module.environment.service = service;
 	add_disco_features_from_service(service);
+	add_disco_features_from_handlers();
 end
 
 function module.save()
