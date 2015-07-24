@@ -291,7 +291,10 @@ function service:publish(node, actor, id, item)
 	local node_data = self.data[node];
 	remove_item_by_id(node_data, id);
 	node_data[#node_data + 1] = id;
-	node_data[id] = item;
+	node_data[id] = {
+		publisher = actor,
+		item = item
+	};
 	trim_items(node_data, node_obj.config["pubsub#max_items"]);
 	self.events.fire_event("item-published", { node = node, actor = actor, id = id, item = item });
 	self.config.broadcaster("items", node, node_obj.subscribers, item, actor);

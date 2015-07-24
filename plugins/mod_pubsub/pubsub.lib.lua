@@ -61,7 +61,7 @@ function handlers.get_items(origin, stanza, items, service)
 
 	local data = st.stanza("items", { node = node });
 	for _, id in ipairs(results) do
-		data:add_child(results[id]);
+		data:add_child(results[id].item);
 	end
 	local reply;
 	if data then
