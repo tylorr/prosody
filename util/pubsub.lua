@@ -9,6 +9,7 @@ local service_mt = { __index = service };
 local default_config = { __index = {
 	broadcaster = function () end;
 	get_affiliation = function () end;
+	get_capabilities = function() end;
 	capabilities = {};
 } };
 local default_node_config = { __index = {
@@ -20,7 +21,6 @@ function new(config)
 	return setmetatable({
 		config = setmetatable(config, default_config);
 		node_defaults = setmetatable(config.node_defaults or {}, default_node_config);
-		affiliations = {};
 		subscriptions = {};
 		nodes = {};
 		data = {};
@@ -33,30 +33,21 @@ function service:jids_equal(jid1, jid2)
 	return normalize(jid1) == normalize(jid2);
 end
 
+function service:actor_equals_jid(actor, jid)
+	if actor == true then return true end;
+	return actor == jid or self:jids_equal(actor, jid);
+end
+
 function service:may(node, actor, action)
 	if actor == true then return true; end
 
 	local node_obj = self.nodes[node];
 	local node_aff = node_obj and node_obj.affiliations[actor];
-	local service_aff = self.affiliations[actor]
-	                 or self.config.get_affiliation(actor, node, action)
-	                 or "none";
+	local service_aff = self.config.get_affiliation(actor, node, action) or "none";
 
-	-- Check if node allows/forbids it
-	local node_capabilities = node_obj and node_obj.capabilities;
-	if node_capabilities then
-		local caps = node_capabilities[node_aff or service_aff];
-		if caps then
-			local can = caps[action];
-			if can ~= nil then
-				return can;
-			end
-		end
-	end
+	local caps = self.config.capabilities[node_aff or service_aff];
+	caps = self.config.get_capabilities(actor, caps) or caps;
 
-	-- Check service-wide capabilities instead
-	local service_capabilities = self.config.capabilities;
-	local caps = service_capabilities[node_aff or service_aff];
 	if caps then
 		local can = caps[action];
 		if can ~= nil then
@@ -96,7 +87,7 @@ end
 function service:add_subscription(node, actor, jid, options)
 	-- Access checking
 	local cap;
-	if actor == true or jid == actor or self:jids_equal(actor, jid) then
+	if self:actor_equals_jid(actor, jid) then
 		cap = "subscribe";
 	else
 		cap = "subscribe_other";
@@ -139,7 +130,7 @@ end
 function service:remove_subscription(node, actor, jid)
 	-- Access checking
 	local cap;
-	if actor == true or jid == actor or self:jids_equal(actor, jid) then
+	if self:actor_equals_jid(actor, jid) then
 		cap = "unsubscribe";
 	else
 		cap = "unsubscribe_other";
@@ -192,7 +183,7 @@ end
 function service:get_subscription(node, actor, jid)
 	-- Access checking
 	local cap;
-	if actor == true or jid == actor or self:jids_equal(actor, jid) then
+	if self:actor_equals_jid(actor, jid) then
 		cap = "get_subscription";
 	else
 		cap = "get_subscription_other";
@@ -311,6 +302,14 @@ function service:retract(node, actor, id, retract)
 	if (not node_obj) or (not self.data[node][id]) then
 		return false, "item-not-found";
 	end
+
+	local publisher = self.data[node][id].publisher;
+	if not self:actor_equals_jid(actor, publisher) then
+		if not self:may(node, actor, "purge") then
+			return false, "forbidden";
+		end
+	end
+
 	self.events.fire_event("item-retracted", { node = node, actor = actor, id = id });
 	remove_item_by_id(self.data[node], id);
 	if retract then
@@ -321,7 +320,7 @@ end
 
 function service:purge(node, actor, notify)
 	-- Access checking
-	if not self:may(node, actor, "retract") then
+	if not self:may(node, actor, "purge") then
 		return false, "forbidden";
 	end
 	--
@@ -366,7 +365,7 @@ end
 function service:get_subscriptions(node, actor, jid)
 	-- Access checking
 	local cap;
-	if actor == true or jid == actor or self:jids_equal(actor, jid) then
+	if self:actor_equals_jid(actor, jid) then
 		cap = "get_subscriptions";
 	else
 		cap = "get_subscriptions_other";
@@ -410,21 +409,6 @@ function service:get_subscriptions(node, actor, jid)
 		end
 	end
 	return true, ret;
-end
-
--- Access models only affect 'none' affiliation caps, service/default access level...
-function service:set_node_capabilities(node, actor, capabilities)
-	-- Access checking
-	if not self:may(node, actor, "configure") then
-		return false, "forbidden";
-	end
-	--
-	local node_obj = self.nodes[node];
-	if not node_obj then
-		return false, "item-not-found";
-	end
-	node_obj.capabilities = capabilities;
-	return true;
 end
 
 function service:set_node_config(node, actor, new_config)

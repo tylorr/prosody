@@ -9,6 +9,9 @@ local xmlns_pubsub_owner = "http://jabber.org/protocol/pubsub#owner";
 
 local autocreate_on_publish = module:get_option_boolean("autocreate_on_publish", false);
 local autocreate_on_subscribe = module:get_option_boolean("autocreate_on_subscribe", false);
+local publisher_may_purge = module:get_option_boolean("publisher_may_purge", false);
+local node_creation_access = module:get_option_string("node_creation_access", "admin");
+
 local pubsub_disco_name = module:get_option("name");
 if type(pubsub_disco_name) ~= "string" then pubsub_disco_name = "Prosody PubSub Service"; end
 local expose_publisher = module:get_option_boolean("expose_publisher", false)
@@ -86,7 +89,7 @@ function handle_pubsub_iq(event, namespace)
 
 	local action_names = {};
 	for _, action in ipairs(actions) do
-		table.insert(action_names, action.name) 
+		table.insert(action_names, action.name)
 	end
 
 	local ns_ = namespace and namespace.."_" or "";
@@ -205,6 +208,40 @@ local function get_affiliation(jid, node)
 	end
 end
 
+local function shallow_merge(target, ...)
+	for _, set in pairs({...}) do
+		if type(set) == "table" then
+			for key, value in pairs(set) do
+				target[key] = value;
+			end
+		end
+	end
+	return target;
+end
+
+local admin_capabilities = {
+	subscribe_other = true;
+	unsubscribe_other = true;
+	get_subscription_other = true;
+	get_subscriptions_other = true;
+};
+
+local function get_capabilities(jid, caps)
+	local new_caps = {};
+	local bare_jid = jid_bare(jid);
+	local is_admin = bare_jid == module.host or usermanager.is_admin(bare_jid, module.host);
+
+	if node_creation_access == "open" or node_creation_access == "admin" and is_admin then
+		new_caps.create = true;
+	end
+
+	if is_admin then
+		shallow_merge(new_caps, admin_capabilities);
+	end
+
+	return shallow_merge(new_caps, caps);
+end
+
 function set_service(new_service)
 	service = new_service;
 	module.environment.service = service;
@@ -223,77 +260,45 @@ end
 function module.load()
 	if module.reloading then return; end
 
+	local none = {
+		get_nodes = true,
+		subscribe = true,
+		unsubscribe = true,
+		get_subscription = true,
+		get_subscriptions = true,
+		be_subscribed = true,
+		be_unsubscribed = true,
+	};
+
+	local member = shallow_merge({
+		get_items = true
+	}, none);
+
+	local publish_only = {
+		publish = true,
+		retract = true,
+	};
+
+	local publisher = shallow_merge({}, member, publish_only);
+
+	if publisher_may_purge then
+		publisher.purge = true;
+	end
+
+	local owner = shallow_merge({
+		set_affiliation = true,
+		delete = true,
+		purge = true,
+		configure = true
+	}, publisher);
+
 	set_service(pubsub.new({
 		capabilities = {
-			none = {
-				create = false;
-				publish = false;
-				retract = false;
-				get_nodes = true;
-
-				subscribe = true;
-				unsubscribe = true;
-				get_subscription = true;
-				get_subscriptions = true;
-				get_items = true;
-
-				subscribe_other = false;
-				unsubscribe_other = false;
-				get_subscription_other = false;
-				get_subscriptions_other = false;
-
-				be_subscribed = true;
-				be_unsubscribed = true;
-
-				set_affiliation = false;
-			};
-			publisher = {
-				create = false;
-				publish = true;
-				retract = true;
-				get_nodes = true;
-
-				subscribe = true;
-				unsubscribe = true;
-				get_subscription = true;
-				get_subscriptions = true;
-				get_items = true;
-
-				subscribe_other = false;
-				unsubscribe_other = false;
-				get_subscription_other = false;
-				get_subscriptions_other = false;
-
-				be_subscribed = true;
-				be_unsubscribed = true;
-
-				set_affiliation = false;
-			};
-			owner = {
-				create = true;
-				publish = true;
-				retract = true;
-				delete = true;
-				get_nodes = true;
-				configure = true;
-
-				subscribe = true;
-				unsubscribe = true;
-				get_subscription = true;
-				get_subscriptions = true;
-				get_items = true;
-
-
-				subscribe_other = true;
-				unsubscribe_other = true;
-				get_subscription_other = true;
-				get_subscriptions_other = true;
-
-				be_subscribed = true;
-				be_unsubscribed = true;
-
-				set_affiliation = true;
-			};
+			none = none;
+			member = member;
+			["publish-only"] = publish_only;
+			publisher = publisher;
+			owner = owner;
 		};
 
 		autocreate_on_publish = autocreate_on_publish;
@@ -301,6 +306,7 @@ function module.load()
 
 		broadcaster = simple_broadcast;
 		get_affiliation = get_affiliation;
+		get_capabilities = get_capabilities;
 
 		normalize_jid = jid_bare;
 	}));
