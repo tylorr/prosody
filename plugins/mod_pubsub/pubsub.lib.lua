@@ -16,6 +16,7 @@ local pubsub_errors = {
 	["invalid-jid"] = { "modify", "bad-request", nil, "invalid-jid" };
 	["jid-required"] = { "modify", "bad-request", nil, "jid-required" };
 	["nodeid-required"] = { "modify", "bad-request", nil, "nodeid-required" };
+	["item-required"] = { "modify", "bad-request", nil, "item-required" };
 	["item-not-found"] = { "cancel", "item-not-found" };
 	["not-subscribed"] = { "modify", "unexpected-request", nil, "not-subscribed" };
 	["forbidden"] = { "auth", "forbidden" };
@@ -254,7 +255,7 @@ function handlers.set_retract(origin, stanza, retract, service)
 	local item = retract:get_child("item");
 	local id = item and item.attr.id
 	if not (node and id) then
-		return origin.send(pubsub_error_reply(stanza, node and "item-not-found" or "nodeid-required"));
+		return origin.send(pubsub_error_reply(stanza, node and "item-required" or "nodeid-required"));
 	end
 	local reply, notifier;
 	if notify then
